@@ -1,6 +1,8 @@
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 
+pub mod users;
+
 /// Build a connection pool for the given Postgres URL.
 pub async fn pool(url: &str) -> sqlx::Result<PgPool> {
     PgPoolOptions::new().max_connections(10).connect(url).await
