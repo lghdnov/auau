@@ -58,10 +58,14 @@ mod tests {
     /// Env var mutation is process-global: serialize env-touching tests.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    /// Keep DATABASE_URL valid at all times: `#[sqlx::test]` in models.rs reads
+    /// it concurrently to create its isolated test databases.
+    const TEST_DATABASE_URL: &str = "postgres://auau:auau@localhost:5432/auau_test";
+
     #[test]
     fn config_reads_env_with_defaults() {
         let _guard = ENV_LOCK.lock().unwrap();
-        std::env::set_var("DATABASE_URL", "postgres://localhost/auau");
+        std::env::set_var("DATABASE_URL", TEST_DATABASE_URL);
         std::env::set_var("BASE_URL", "http://localhost:5173");
         std::env::set_var("OIDC_ISSUER", "https://sso.example.com");
         std::env::set_var("OIDC_CLIENT_ID", "auau-client");
@@ -72,7 +76,7 @@ mod tests {
 
         let config = Config::from_env().unwrap();
 
-        assert_eq!(config.database_url, "postgres://localhost/auau");
+        assert_eq!(config.database_url, TEST_DATABASE_URL);
         assert_eq!(config.storage_dir, PathBuf::from("./data"));
         assert_eq!(config.base_url, "http://localhost:5173");
         assert_eq!(config.oidc_issuer, "https://sso.example.com");
@@ -86,7 +90,7 @@ mod tests {
     #[test]
     fn config_reads_max_upload_mb_override() {
         let _guard = ENV_LOCK.lock().unwrap();
-        std::env::set_var("DATABASE_URL", "postgres://localhost/auau");
+        std::env::set_var("DATABASE_URL", TEST_DATABASE_URL);
         std::env::set_var("BASE_URL", "http://localhost:5173");
         std::env::set_var("OIDC_ISSUER", "https://sso.example.com");
         std::env::set_var("OIDC_CLIENT_ID", "auau-client");
@@ -105,10 +109,20 @@ mod tests {
     #[test]
     fn config_missing_required_var_returns_error() {
         let _guard = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("DATABASE_URL");
+        std::env::set_var("DATABASE_URL", TEST_DATABASE_URL);
+        std::env::set_var("BASE_URL", "http://localhost:5173");
+        std::env::set_var("OIDC_CLIENT_ID", "auau-client");
+        std::env::set_var("OIDC_CLIENT_SECRET", "oidc-secret");
+        std::env::set_var("SESSION_SECRET", "session-secret");
+        std::env::remove_var("OIDC_ISSUER");
 
         let result = Config::from_env();
 
         assert!(result.is_err());
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.contains("OIDC_ISSUER"),
+            "error should name the missing variable: {message}"
+        );
     }
 }
