@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use sqlx::FromRow;
 use uuid::Uuid;
 
@@ -13,7 +14,7 @@ pub struct User {
 }
 
 /// A labeling project.
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, FromRow, Serialize)]
 pub struct Project {
     pub id: Uuid,
     pub name: String,
@@ -23,7 +24,7 @@ pub struct Project {
 }
 
 /// A label in the project palette.
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, FromRow, Serialize)]
 pub struct Label {
     pub id: Uuid,
     pub project_id: Uuid,
