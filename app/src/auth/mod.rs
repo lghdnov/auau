@@ -1,3 +1,4 @@
+pub mod oidc;
 pub mod session;
 
 use axum::extract::FromRequestParts;
@@ -39,13 +40,17 @@ impl FromRequestParts<AppState> for CurrentUser {
 
 /// Pull the `auau_session` cookie value out of the request headers.
 fn session_cookie(parts: &Parts) -> Option<&str> {
-    parts
-        .headers
+    cookie_value(&parts.headers, SESSION_COOKIE)
+}
+
+/// Look up a cookie value across all `Cookie` request headers.
+pub(crate) fn cookie_value<'a>(headers: &'a axum::http::HeaderMap, name: &str) -> Option<&'a str> {
+    headers
         .get_all(axum::http::header::COOKIE)
         .iter()
         .filter_map(|value| value.to_str().ok())
         .flat_map(|header| header.split(';'))
         .map(|cookie| cookie.trim())
-        .find_map(|cookie| cookie.strip_prefix(SESSION_COOKIE))
+        .find_map(|cookie| cookie.strip_prefix(name))
         .and_then(|rest| rest.strip_prefix('='))
 }
