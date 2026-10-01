@@ -100,14 +100,22 @@ async fn create(
     let name = validate_name(&payload.name)?;
     let hotkey = validate_hotkey(payload.hotkey.as_deref())?;
 
+    let mut tx = state.pool.begin().await.map_err(internal)?;
+
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(project_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
+
     let next: i32 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM labels WHERE project_id = $1",
     )
     .bind(project_id)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .map_err(internal)?;
-    let color = PALETTE[usize::try_from(next).unwrap_or(0) % PALETTE.len()];
+    let color = PALETTE[next.rem_euclid(PALETTE.len() as i32) as usize];
 
     let inserted = sqlx::query_as::<_, Label>(
         "INSERT INTO labels (id, project_id, name, color, hotkey, sort_order)
@@ -120,17 +128,24 @@ async fn create(
     .bind(color)
     .bind(hotkey)
     .bind(next)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await;
 
-    match inserted {
-        Ok(label) => Ok((StatusCode::CREATED, Json(label))),
-        Err(sqlx::Error::Database(db)) if db.is_unique_violation() => Err(duplicate(db.as_ref())),
-        Err(sqlx::Error::Database(db)) if db.is_foreign_key_violation() => Err(AppError::NotFound(
-            format!("project {project_id} not found"),
-        )),
-        Err(err) => Err(internal(err)),
-    }
+    let label = match inserted {
+        Ok(label) => label,
+        Err(sqlx::Error::Database(db)) if db.is_unique_violation() => {
+            return Err(duplicate(db.as_ref()));
+        }
+        Err(sqlx::Error::Database(db)) if db.is_foreign_key_violation() => {
+            return Err(AppError::NotFound(format!(
+                "project {project_id} not found"
+            )));
+        }
+        Err(err) => return Err(internal(err)),
+    };
+    tx.commit().await.map_err(internal)?;
+
+    Ok((StatusCode::CREATED, Json(label)))
 }
 
 /// `PATCH /api/v1/labels/:id` — rename, recolor, re-hotkey or reorder.
@@ -500,6 +515,21 @@ mod tests {
         assert_eq!(patched["name"], json!("ржач"));
         assert_eq!(patched["color"], json!("#123456"));
         assert_eq!(patched["hotkey"], json!("7"));
+
+        post_label(&app, &cookie, project_id, json!({"name": "тишина"})).await;
+        let (status, body) = test_support::json(
+            app.clone()
+                .oneshot(patch_json(
+                    &format!("/api/v1/labels/{label_id}"),
+                    &cookie,
+                    json!({"name": "тишина"}),
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(body["error"]["code"], json!("duplicate"));
 
         let (status, body) = test_support::json(
             app.oneshot(patch_json(
