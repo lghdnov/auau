@@ -11,6 +11,7 @@ use crate::auth::CurrentUser;
 
 pub mod auth_routes;
 pub mod dto;
+pub mod labels;
 pub mod projects;
 
 #[cfg(test)]
@@ -34,6 +35,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/me", get(me))
         .merge(auth_routes::router())
         .merge(projects::router())
+        .merge(labels::router())
         .with_state(state)
 }
 
