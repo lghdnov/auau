@@ -6,7 +6,6 @@ use crate::models::{FileStatus, Label, Project};
 ///
 /// `processing` files are mid-transcode and intentionally not surfaced.
 #[derive(Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct FileCounts {
     pub new: i64,
     pub in_progress: i64,

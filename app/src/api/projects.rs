@@ -178,7 +178,7 @@ mod tests {
     fn zero_counts() -> Value {
         json!({
             "new": 0,
-            "inProgress": 0,
+            "in_progress": 0,
             "done": 0,
             "error": 0,
         })
@@ -414,7 +414,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
             detail["counts"],
-            json!({"new": 2, "inProgress": 1, "done": 3, "error": 1})
+            json!({"new": 2, "in_progress": 1, "done": 3, "error": 1})
         );
 
         let (status, list) = test_support::json(
@@ -432,7 +432,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             summary["counts"],
-            json!({"new": 2, "inProgress": 1, "done": 3, "error": 1})
+            json!({"new": 2, "in_progress": 1, "done": 3, "error": 1})
         );
     }
 
