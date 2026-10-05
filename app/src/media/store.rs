@@ -21,6 +21,10 @@ impl MediaStore {
     }
 
     /// Path of the stored original: `<root>/media/<id>.<ext>`.
+    ///
+    /// This is traversal-safe only because `id` is a caller-generated UUID,
+    /// never user input; callers must pass an allowlisted extension (e.g.
+    /// `"wav"`), since a raw user-supplied `ext` could contain `/` or `..`.
     pub fn media_path(&self, id: Uuid, ext: &str) -> PathBuf {
         self.root.join("media").join(format!("{id}.{ext}"))
     }
