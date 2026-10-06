@@ -257,7 +257,7 @@ mod tests {
         let path = dir.path().join("sine.wav");
         std::fs::write(&path, crate::media::testutil::sine_wav(440.0, 1.0, 8000)).unwrap();
 
-        let (samples, sample_rate) = crate::media::probe::decode_to_i16(&path).unwrap();
+        let (samples, sample_rate, _channels) = crate::media::probe::decode_to_i16(&path).unwrap();
         assert_eq!(sample_rate, 8000);
         assert_eq!(samples.len(), 8000);
 
@@ -283,7 +283,7 @@ mod tests {
         let path = dir.path().join("short.wav");
         std::fs::write(&path, crate::media::testutil::sine_wav(440.0, 0.3, 8000)).unwrap();
 
-        let (samples, sample_rate) = crate::media::probe::decode_to_i16(&path).unwrap();
+        let (samples, sample_rate, _channels) = crate::media::probe::decode_to_i16(&path).unwrap();
         let peaks = compute(&samples, sample_rate);
 
         assert_eq!(peaks.detail.len(), 30);

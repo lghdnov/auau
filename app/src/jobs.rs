@@ -80,8 +80,8 @@ async fn process_file(pool: &PgPool, store: &MediaStore, file_id: Uuid) -> anyho
     let path = store.media_path(file.id, &ext);
 
     let worker_store = store.clone();
-    let outcome = tokio::task::spawn_blocking(move || -> Result<(i32, i32), String> {
-        let (samples, sample_rate) = match decode_to_i16(&path) {
+    let outcome = tokio::task::spawn_blocking(move || -> Result<(i32, i32, i32), String> {
+        let (samples, sample_rate, channels) = match decode_to_i16(&path) {
             Ok(decoded) => decoded,
             Err(err) => return Err(err.to_string()),
         };
@@ -90,23 +90,24 @@ async fn process_file(pool: &PgPool, store: &MediaStore, file_id: Uuid) -> anyho
         worker_store
             .write_peaks(file.id, &encoded)
             .map_err(|err| format!("failed to write peaks: {err}"))?;
-        Ok((duration_ms, sample_rate as i32))
+        Ok((duration_ms, sample_rate as i32, i32::from(channels)))
     })
     .await
     .map_err(|err| format!("processing task panicked: {err}"))
     .and_then(|inner| inner);
 
     match outcome {
-        Ok((duration_ms, sample_rate)) => {
+        Ok((duration_ms, sample_rate, channels)) => {
             sqlx::query(
                 "UPDATE audio_files
-                 SET duration_ms = $2, sample_rate = $3, channels = 1,
+                 SET duration_ms = $2, sample_rate = $3, channels = $4,
                      status = 'new', error_message = NULL
                  WHERE id = $1 AND status = 'processing'",
             )
             .bind(file.id)
             .bind(duration_ms)
             .bind(sample_rate)
+            .bind(channels)
             .execute(pool)
             .await?;
         }

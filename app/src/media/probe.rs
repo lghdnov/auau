@@ -98,11 +98,17 @@ pub fn probe(path: &Path) -> Result<ProbeInfo, ProbeError> {
 /// Decode the audio file at `path` into mono i16 samples.
 ///
 /// Multi-channel audio is mixed down to mono (channels averaged per frame);
-/// returns `(samples, sample_rate)`. Shares the panic-fenced decode loop of
-/// [`probe`], so malformed uploads surface as `Err` instead of panicking.
-pub fn decode_to_i16(path: &Path) -> Result<(Vec<i16>, u32), ProbeError> {
+/// returns `(samples, sample_rate, channels)`, where `channels` is the source
+/// stream's channel count *before* the mix-down. Shares the panic-fenced
+/// decode loop of [`probe`], so malformed uploads surface as `Err` instead of
+/// panicking.
+pub fn decode_to_i16(path: &Path) -> Result<(Vec<i16>, u32, u16), ProbeError> {
     let decoded = decode_fenced(path)?;
-    Ok((decoded.samples, decoded.sample_rate))
+    Ok((
+        decoded.samples,
+        decoded.sample_rate,
+        decoded.channels as u16,
+    ))
 }
 
 /// A fully decoded audio stream mixed down to mono.
@@ -279,9 +285,10 @@ mod tests {
             &crate::media::testutil::sine_wav(440.0, 1.0, 8000),
         );
 
-        let (samples, sample_rate) = decode_to_i16(&path).unwrap();
+        let (samples, sample_rate, channels) = decode_to_i16(&path).unwrap();
 
         assert_eq!(sample_rate, 8000);
+        assert_eq!(channels, 1);
         assert_eq!(samples.len(), 8000);
         assert!(*samples.iter().max().unwrap() > 29000);
         assert!(*samples.iter().min().unwrap() < -29000);

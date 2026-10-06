@@ -70,8 +70,9 @@ fn invalid_multipart(err: axum::extract::multipart::MultipartError) -> AppError 
 
 /// The upload-extension allowlist. The extension is taken from the original
 /// filename, lowercased; per the `media_path` contract only these values may
-/// ever reach a storage path. (`m4a` is deliberately absent: the MP4 container
-/// parses, but AAC decode would fail, so it is rejected up front.)
+/// ever reach a storage path. (`m4a` is deliberately included: per spec the
+/// container is accepted and decode is attempted — an AAC failure lands in
+/// status `error` with a recorded cause.)
 fn allowed_ext(filename: &str) -> Option<&'static str> {
     let ext = filename.rsplit_once('.')?.1.to_ascii_lowercase();
     match ext.as_str() {
@@ -79,6 +80,7 @@ fn allowed_ext(filename: &str) -> Option<&'static str> {
         "flac" => Some("flac"),
         "mp3" => Some("mp3"),
         "ogg" => Some("ogg"),
+        "m4a" => Some("m4a"),
         _ => None,
     }
 }
@@ -89,6 +91,7 @@ fn mime_for(ext: &str) -> &'static str {
         "flac" => "audio/flac",
         "mp3" => "audio/mpeg",
         "ogg" => "audio/ogg",
+        "m4a" => "audio/mp4",
         _ => "audio/wav",
     }
 }
@@ -228,7 +231,11 @@ async fn upload(
             Err(sqlx::Error::Database(db)) if db.is_unique_violation() => {
                 let existing = find_by_sha256(&state.pool, project_id, &sha256)
                     .await?
-                    .expect("unique violation implies an existing row");
+                    .ok_or_else(|| {
+                        AppError::Internal(anyhow::anyhow!(
+                            "unique violation on (project_id, sha256) but no existing row found"
+                        ))
+                    })?;
                 results.push(duplicate(original_name, existing));
                 continue;
             }
@@ -681,7 +688,7 @@ mod tests {
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie).await;
 
-        for filename in ["notes.txt", "song.m4a"] {
+        for filename in ["notes.txt", "program.exe"] {
             let (status, body) = upload(&app, &cookie, project, filename, b"whatever").await;
             assert_eq!(status, StatusCode::CREATED);
             assert_eq!(body[0]["status"], json!("rejected"));
@@ -705,6 +712,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 1, "only the allowlisted upload is stored");
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn upload_accepts_m4a_for_decode_attempt(pool: PgPool) {
+        let app = crate::api::router(test_support::state(pool.clone()));
+        let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
+        let project = create_project(&app, &cookie).await;
+
+        let (status, body) = upload(&app, &cookie, project, "song.m4a", b"fake mp4 bytes").await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(body[0]["status"], json!("accepted"));
+        let file_id: Uuid = body[0]["file_id"].as_str().unwrap().parse().unwrap();
+
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT original_name FROM audio_files WHERE id = $1")
+                .bind(file_id)
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored.as_deref(), Some("song.m4a"));
     }
 
     #[sqlx::test(migrations = "./migrations")]
