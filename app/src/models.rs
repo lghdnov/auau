@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
@@ -36,7 +36,7 @@ pub struct Label {
 }
 
 /// An uploaded audio file with its processing/queue status.
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, FromRow, Serialize)]
 pub struct AudioFile {
     pub id: Uuid,
     pub project_id: Uuid,
@@ -70,8 +70,9 @@ pub struct Annotation {
 }
 
 /// Lifecycle of an audio file: media preparation and queue in one state machine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum FileStatus {
     Processing,
     New,

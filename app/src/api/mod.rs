@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
@@ -8,9 +9,12 @@ use sqlx::PgPool;
 use crate::auth::oidc::{CodeExchanger, OidcSettings};
 use crate::auth::session::SessionSecret;
 use crate::auth::CurrentUser;
+use crate::jobs::JobQueue;
+use crate::media::store::MediaStore;
 
 pub mod auth_routes;
 pub mod dto;
+pub mod files;
 pub mod labels;
 pub mod projects;
 
@@ -26,17 +30,26 @@ pub struct AppState {
     pub oidc: OidcSettings,
     /// Production code exchanger (mocked in tests).
     pub exchanger: Arc<dyn CodeExchanger>,
+    /// Local media storage shared by handlers and the processing worker.
+    pub store: MediaStore,
+    /// Sender side of the processing pipeline; uploads enqueue here.
+    pub jobs: JobQueue,
+    /// Per-file upload size cap.
+    pub max_upload_bytes: usize,
 }
 
 /// Build the application API router.
 pub fn router(state: AppState) -> Router {
+    let body_limit = state.max_upload_bytes.saturating_add(1024 * 1024);
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/me", get(me))
         .merge(auth_routes::router())
         .merge(projects::router())
         .merge(labels::router())
+        .merge(files::router())
         .with_state(state)
+        .layer(DefaultBodyLimit::max(body_limit))
 }
 
 /// Liveness probe.

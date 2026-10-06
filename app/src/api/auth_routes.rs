@@ -141,6 +141,7 @@ struct CallbackParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::test_support;
     use crate::auth::oidc::{CodeExchanger, ExchangedUser, OidcSettings};
     use axum::body::Body;
     use axum::http::Request;
@@ -168,6 +169,7 @@ mod tests {
     }
 
     fn state(pool: PgPool) -> AppState {
+        let (jobs, _job_rx) = crate::jobs::JobQueue::new();
         AppState {
             pool,
             session_secret: session::SessionSecret::new(TEST_SECRET),
@@ -178,6 +180,9 @@ mod tests {
                 end_session_url: None,
             },
             exchanger: Arc::new(MockExchanger),
+            store: crate::media::store::MediaStore::new(std::env::temp_dir()),
+            jobs,
+            max_upload_bytes: test_support::TEST_MAX_UPLOAD_BYTES,
         }
     }
 

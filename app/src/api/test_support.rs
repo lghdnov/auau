@@ -2,6 +2,7 @@
 //! no-op OIDC exchanger, a signed-in user with a session cookie, and small
 //! request/response helpers.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -16,10 +17,15 @@ use crate::auth::session::{self, SessionSecret};
 use crate::auth::SESSION_COOKIE;
 use crate::db::users;
 use crate::error::AppError;
+use crate::jobs::{self, JobQueue};
+use crate::media::store::MediaStore;
 use crate::models::User;
 
 /// Signing key for test session tokens; matches [`state`].
 pub(crate) const TEST_SECRET: &str = "test-session-secret";
+
+/// Per-file upload cap for tests that do not exercise size limits.
+pub(crate) const TEST_MAX_UPLOAD_BYTES: usize = 512 * 1024 * 1024;
 
 /// Handler tests under `/me`, `/projects`, ... never exchange codes; this
 /// stands in for the production exchanger so `AppState` needs no network.
@@ -35,7 +41,24 @@ impl CodeExchanger for UnusedExchanger {
 }
 
 /// Build `AppState` with the [`TEST_SECRET`] session key and no-op OIDC wiring.
+///
+/// The media store lives in a leaked tempdir (outlives the test) and a real
+/// processing worker drains the queue in the background.
 pub(crate) fn state(pool: PgPool) -> AppState {
+    let store_root = tempfile::tempdir().unwrap().keep();
+    state_with_store(pool, store_root, TEST_MAX_UPLOAD_BYTES)
+}
+
+/// Like [`state`], but with an explicit store root and per-file upload cap,
+/// so tests can assert on-disk effects and mock small size limits.
+pub(crate) fn state_with_store(
+    pool: PgPool,
+    store_root: PathBuf,
+    max_upload_bytes: usize,
+) -> AppState {
+    let store = MediaStore::new(store_root);
+    let (jobs, job_rx) = JobQueue::new();
+    let _worker = jobs::spawn_worker(pool.clone(), store.clone(), job_rx);
     AppState {
         pool,
         session_secret: SessionSecret::new(TEST_SECRET),
@@ -46,6 +69,9 @@ pub(crate) fn state(pool: PgPool) -> AppState {
             end_session_url: None,
         },
         exchanger: Arc::new(UnusedExchanger),
+        store,
+        jobs,
+        max_upload_bytes,
     }
 }
 
