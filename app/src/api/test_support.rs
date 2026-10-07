@@ -104,6 +104,15 @@ pub(crate) fn post_json(uri: &str, cookie: &str, body: impl serde::Serialize) ->
         .unwrap()
 }
 
+/// A PUT request with a JSON body, authorized by the given cookie header value.
+pub(crate) fn put_json(uri: &str, cookie: &str, body: impl serde::Serialize) -> Request<Body> {
+    Request::put(uri)
+        .header(header::COOKIE, cookie)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap()
+}
+
 /// Drain a response into its status and parsed JSON body.
 pub(crate) async fn json(response: Response) -> (StatusCode, serde_json::Value) {
     let status = response.status();

@@ -12,6 +12,7 @@ use crate::auth::CurrentUser;
 use crate::jobs::JobQueue;
 use crate::media::store::MediaStore;
 
+pub mod annotations;
 pub mod auth_routes;
 pub mod dto;
 pub mod files;
@@ -50,6 +51,7 @@ pub fn router(state: AppState) -> Router {
         .merge(labels::router())
         .merge(files::router())
         .merge(queue::router())
+        .merge(annotations::router())
         .with_state(state)
         .layer(DefaultBodyLimit::max(body_limit))
 }
