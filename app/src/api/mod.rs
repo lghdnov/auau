@@ -17,6 +17,7 @@ pub mod auth_routes;
 pub mod dto;
 pub mod files;
 pub mod labels;
+pub mod media;
 pub mod projects;
 pub mod queue;
 
@@ -52,6 +53,7 @@ pub fn router(state: AppState) -> Router {
         .merge(files::router())
         .merge(queue::router())
         .merge(annotations::router())
+        .merge(media::router())
         .with_state(state)
         .layer(DefaultBodyLimit::max(body_limit))
 }
