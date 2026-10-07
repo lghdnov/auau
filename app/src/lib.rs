@@ -6,3 +6,4 @@ pub mod error;
 pub mod jobs;
 pub mod media;
 pub mod models;
+pub mod validate;

@@ -54,6 +54,20 @@ pub fn spawn_worker(
     })
 }
 
+/// Return expired queue leases: `in_progress` files whose `claim_expires_at`
+/// has passed go back to `new`, unclaimed. Annotations are deliberately kept
+/// — the next annotator continues the partial work. Returns the number of
+/// freed files.
+pub async fn sweep_expired_leases(pool: &PgPool) -> anyhow::Result<u64> {
+    let result = sqlx::query(
+        "UPDATE audio_files SET status = 'new', claimed_by = NULL, claim_expires_at = NULL
+             WHERE status = 'in_progress' AND claim_expires_at < now()",
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 /// Run one file through the pipeline: decode → peaks → `new`, or `error` with
 /// the recorded cause. Infrastructure failures (not decode failures) propagate
 /// to the worker loop.

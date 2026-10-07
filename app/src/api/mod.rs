@@ -17,6 +17,7 @@ pub mod dto;
 pub mod files;
 pub mod labels;
 pub mod projects;
+pub mod queue;
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -48,6 +49,7 @@ pub fn router(state: AppState) -> Router {
         .merge(projects::router())
         .merge(labels::router())
         .merge(files::router())
+        .merge(queue::router())
         .with_state(state)
         .layer(DefaultBodyLimit::max(body_limit))
 }

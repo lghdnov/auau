@@ -22,6 +22,24 @@ async fn main() -> anyhow::Result<()> {
     let store = MediaStore::new(config.storage_dir.clone());
     let (jobs, job_rx) = JobQueue::new();
     let _worker = jobs::spawn_worker(pool.clone(), store.clone(), job_rx);
+
+    {
+        let sweeper_pool = pool.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                match jobs::sweep_expired_leases(&sweeper_pool).await {
+                    Ok(expired) if expired > 0 => {
+                        tracing::info!(expired, "returned expired leases to the queue");
+                    }
+                    Ok(_) => {}
+                    Err(err) => tracing::error!(error = ?err, "lease sweep failed"),
+                }
+            }
+        });
+    }
+
     let max_upload_bytes = config.max_upload_bytes();
 
     let exchanger = PocketIdExchanger::from_config(&config).await?;
