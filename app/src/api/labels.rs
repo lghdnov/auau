@@ -278,7 +278,7 @@ mod tests {
     #[tokio::test]
     async fn labels_require_a_session() {
         let pool = PgPool::connect_lazy("postgres://localhost/auau").unwrap();
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
 
         for (method, uri, body) in [
             (
@@ -312,7 +312,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn create_label_autocolors_and_orders(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project_id = create_project(&app, &cookie, "подкаст").await;
 
@@ -341,7 +341,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn hotkey_unique_per_project_409(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let alpha = create_project(&app, &cookie, "alpha").await;
         let beta = create_project(&app, &cookie, "beta").await;
@@ -374,7 +374,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn create_label_duplicate_name_409(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project_id = create_project(&app, &cookie, "разметка").await;
 
@@ -388,7 +388,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn create_label_on_missing_project_404(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
 
         let (status, body) =
@@ -399,7 +399,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn archive_label_hides_from_detail(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project_id = create_project(&app, &cookie, "подкаст").await;
 
@@ -462,7 +462,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn patch_label_renames_and_recolors(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project_id = create_project(&app, &cookie, "подкаст").await;
 
@@ -547,7 +547,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn create_label_rejects_empty_name_400(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project_id = create_project(&app, &cookie, "подкаст").await;
 
@@ -560,7 +560,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn hotkey_multichar_rejected_400(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project_id = create_project(&app, &cookie, "подкаст").await;
 

@@ -483,7 +483,7 @@ mod tests {
     #[tokio::test]
     async fn export_requires_a_session() {
         let pool = PgPool::connect_lazy("postgres://localhost/auau").unwrap();
-        let app = crate::api::router(test_support::state(pool));
+        let app = crate::api::build_router(test_support::state(pool));
         let uri = export_uri(Uuid::new_v4(), "json");
 
         let (status, body) = test_support::json(
@@ -498,7 +498,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn export_json_includes_only_done_files(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (alice, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie, "подкаст").await;
         let t0 = Utc::now();
@@ -606,7 +606,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn export_archived_label_still_resolves(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (alice, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie, "архивный набор").await;
         let t0 = Utc::now();
@@ -651,7 +651,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn export_csv_columns_and_rows(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (alice, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie, "podcast").await;
         let t0 = Utc::now();
@@ -736,7 +736,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn export_invalid_format_400(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_alice, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie, "форматы").await;
 
@@ -755,7 +755,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn export_missing_project_404(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_alice, cookie) = test_support::signed_in(&pool).await.unwrap();
 
         let (status, body) = test_support::json(
@@ -773,7 +773,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn export_empty_project(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (alice, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie, "пусто").await;
         insert_label(&pool, project, "смех", 1, false).await;

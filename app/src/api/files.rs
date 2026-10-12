@@ -542,7 +542,7 @@ mod tests {
     #[tokio::test]
     async fn upload_requires_a_session() {
         let pool = PgPool::connect_lazy("postgres://localhost/auau").unwrap();
-        let app = crate::api::router(test_support::state(pool));
+        let app = crate::api::build_router(test_support::state(pool));
 
         let (status, body) = test_support::json(
             app.oneshot(upload_file(
@@ -562,7 +562,7 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn upload_processes_to_new(pool: PgPool) {
         let state = test_support::state(pool.clone());
-        let app = crate::api::router(state.clone());
+        let app = crate::api::build_router(state.clone());
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie).await;
 
@@ -593,7 +593,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn upload_invalid_audio_marks_error(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie).await;
 
@@ -633,7 +633,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn upload_duplicate_sha256_conflicts(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie).await;
 
@@ -658,7 +658,7 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn upload_rejects_oversize(pool: PgPool) {
         let dir = tempfile::tempdir().unwrap().keep();
-        let app = crate::api::router(test_support::state_with_store(pool.clone(), dir, 64));
+        let app = crate::api::build_router(test_support::state_with_store(pool.clone(), dir, 64));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie).await;
 
@@ -684,7 +684,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn upload_rejects_unknown_extension(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie).await;
 
@@ -716,7 +716,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn upload_accepts_m4a_for_decode_attempt(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie).await;
 
@@ -736,7 +736,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn delete_done_file_conflicts(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie).await;
 
@@ -777,7 +777,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap().keep();
         let state =
             test_support::state_with_store(pool.clone(), dir, test_support::TEST_MAX_UPLOAD_BYTES);
-        let app = crate::api::router(state.clone());
+        let app = crate::api::build_router(state.clone());
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie).await;
 
@@ -816,7 +816,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn delete_in_progress_follows_lease(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (alice, alice_cookie) = test_support::signed_in(&pool).await.unwrap();
         let (bob, bob_cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &alice_cookie).await;
@@ -865,7 +865,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn list_files_filters_paginates_and_counts(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie).await;
 

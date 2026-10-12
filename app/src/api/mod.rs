@@ -6,6 +6,7 @@ use axum::{Json, Router};
 use serde_json::json;
 use sqlx::PgPool;
 
+use crate::assets;
 use crate::auth::oidc::{CodeExchanger, OidcSettings};
 use crate::auth::session::SessionSecret;
 use crate::auth::CurrentUser;
@@ -42,8 +43,10 @@ pub struct AppState {
     pub max_upload_bytes: usize,
 }
 
-/// Build the application API router.
-pub fn router(state: AppState) -> Router {
+/// Build the final application router: the `/api/v1/*` API, the top-level
+/// `/media/{id}` streaming routes, and — for anything else — the embedded
+/// SPA (see [`crate::assets`]). `main` calls this one function.
+pub fn build_router(state: AppState) -> Router {
     let body_limit = state.max_upload_bytes.saturating_add(1024 * 1024);
     Router::new()
         .route("/api/v1/health", get(health))
@@ -56,6 +59,7 @@ pub fn router(state: AppState) -> Router {
         .merge(annotations::router())
         .merge(export::router())
         .merge(media::router())
+        .fallback(assets::spa_fallback)
         .with_state(state)
         .layer(DefaultBodyLimit::max(body_limit))
 }
@@ -86,9 +90,52 @@ mod tests {
     use crate::db::users;
 
     #[tokio::test]
+    async fn spa_served_and_api_guarded() {
+        let pool = PgPool::connect_lazy("postgres://localhost/auau").unwrap();
+        let app = build_router(test_support::state(pool));
+
+        let response = app
+            .clone()
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let (status, headers, body) = test_support::text(response).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("text/html")
+        );
+        assert!(body.contains("auau"), "index.html should mention auau");
+
+        let response = app
+            .clone()
+            .oneshot(Request::get("/some/spa/route").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let (status, _, body) = test_support::text(response).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("auau"), "deep links should get the shell");
+
+        let response = app
+            .clone()
+            .oneshot(Request::get("/api/v1/me").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let response = app
+            .oneshot(Request::get("/api/v1/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn health_returns_ok() {
         let pool = PgPool::connect_lazy("postgres://localhost/auau").unwrap();
-        let response = router(test_support::state(pool))
+        let response = build_router(test_support::state(pool))
             .oneshot(Request::get("/api/v1/health").body(Body::empty()).unwrap())
             .await
             .unwrap();
@@ -100,7 +147,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn me_without_cookie_returns_401(pool: PgPool) {
-        let response = router(test_support::state(pool))
+        let response = build_router(test_support::state(pool))
             .oneshot(Request::get("/api/v1/me").body(Body::empty()).unwrap())
             .await
             .unwrap();
@@ -121,7 +168,7 @@ mod tests {
             chrono::Utc::now().timestamp(),
         );
 
-        let response = router(test_support::state(pool))
+        let response = build_router(test_support::state(pool))
             .oneshot(
                 Request::get("/api/v1/me")
                     .header("cookie", format!("auau_session={token}"))

@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
         jobs,
         max_upload_bytes,
     };
-    let app = api::router(state);
+    let app = api::build_router(state);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     tracing::info!("listening on {}", listener.local_addr()?);
     axum::serve(listener, app).await?;

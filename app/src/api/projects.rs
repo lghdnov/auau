@@ -187,7 +187,7 @@ mod tests {
     #[tokio::test]
     async fn projects_require_a_session() {
         let pool = PgPool::connect_lazy("postgres://localhost/auau").unwrap();
-        let app = crate::api::router(test_support::state(pool));
+        let app = crate::api::build_router(test_support::state(pool));
 
         for uri in [
             "/api/v1/projects".to_string(),
@@ -221,7 +221,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn projects_crud_flow(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (user, cookie) = test_support::signed_in(&pool).await.unwrap();
 
         let (status, body) = test_support::json(
@@ -329,7 +329,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn create_duplicate_name_conflicts(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (_user, cookie) = test_support::signed_in(&pool).await.unwrap();
 
         let (status, _) = test_support::json(
@@ -368,7 +368,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn detail_counts_reflect_statuses(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (user, cookie) = test_support::signed_in(&pool).await.unwrap();
 
         let (status, project) = test_support::json(

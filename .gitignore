@@ -2,5 +2,8 @@ data/
 target/
 node_modules/
 dist/
+!web/dist/
+web/dist/*
+!web/dist/index.html
 .env
 .superpowers/

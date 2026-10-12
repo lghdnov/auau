@@ -243,7 +243,7 @@ mod tests {
     #[tokio::test]
     async fn login_redirects_to_authorize_url_with_state_cookie() {
         let pool = PgPool::connect_lazy("postgres://localhost/auau").unwrap();
-        let app = crate::api::router(state(pool));
+        let app = crate::api::build_router(state(pool));
         let mut cookies = Vec::new();
 
         let location = login(&app, &mut cookies).await;
@@ -288,7 +288,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn callback_creates_user_and_session(pool: PgPool) {
-        let app = crate::api::router(state(pool));
+        let app = crate::api::build_router(state(pool));
         let mut cookies = Vec::new();
 
         let location = login(&app, &mut cookies).await;
@@ -351,7 +351,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn callback_rejects_wrong_state(pool: PgPool) {
-        let app = crate::api::router(state(pool));
+        let app = crate::api::build_router(state(pool));
         let mut cookies = Vec::new();
 
         login(&app, &mut cookies).await;
@@ -375,7 +375,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn callback_without_state_cookie_is_rejected(pool: PgPool) {
-        let app = crate::api::router(state(pool));
+        let app = crate::api::build_router(state(pool));
 
         let response = app
             .oneshot(
@@ -395,7 +395,7 @@ mod tests {
 
         let mut app_state = state(pool.clone());
         app_state.oidc.end_session_url = Some(format!("{ISSUER}/api/v1/end-session"));
-        let response = crate::api::router(app_state)
+        let response = crate::api::build_router(app_state)
             .oneshot(
                 Request::post("/api/v1/auth/logout")
                     .body(Body::empty())
@@ -419,7 +419,7 @@ mod tests {
         let raw_cookie = cookies.first().unwrap();
         assert!(raw_cookie.contains("Max-Age=0"), "{raw_cookie}");
 
-        let response = crate::api::router(state(pool))
+        let response = crate::api::build_router(state(pool))
             .oneshot(
                 Request::post("/api/v1/auth/logout")
                     .body(Body::empty())

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::request::Request;
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::Response;
 use sqlx::PgPool;
 
@@ -120,4 +120,19 @@ pub(crate) async fn json(response: Response) -> (StatusCode, serde_json::Value) 
         .await
         .unwrap();
     (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+/// Drain a response into its status, headers, and body as UTF-8 text —
+/// for non-JSON payloads such as the SPA shell.
+pub(crate) async fn text(response: Response) -> (StatusCode, HeaderMap, String) {
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (
+        status,
+        headers,
+        String::from_utf8_lossy(&bytes).into_owned(),
+    )
 }

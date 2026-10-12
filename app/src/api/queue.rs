@@ -404,7 +404,7 @@ mod tests {
     #[tokio::test]
     async fn queue_requires_a_session() {
         let pool = PgPool::connect_lazy("postgres://localhost/auau").unwrap();
-        let app = crate::api::router(test_support::state(pool));
+        let app = crate::api::build_router(test_support::state(pool));
 
         for uri in [
             format!("/api/v1/projects/{}/queue/claim", Uuid::new_v4()),
@@ -426,7 +426,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn claim_race_single_file_one_wins(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (alice, alice_cookie) = test_support::signed_in(&pool).await.unwrap();
         let (bob, bob_cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &alice_cookie).await;
@@ -468,7 +468,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn claim_empty_queue_returns_204(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie).await;
 
@@ -514,7 +514,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn claim_rejects_unknown_order_400(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &cookie).await;
         insert_file(&pool, project, user.id, FileStatus::New, None, None, None).await;
@@ -569,7 +569,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn expired_lease_returns_file_keeps_annotations(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (alice, alice_cookie) = test_support::signed_in(&pool).await.unwrap();
         let (bob, bob_cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &alice_cookie).await;
@@ -630,7 +630,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn complete_with_zero_segments_succeeds(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (alice, alice_cookie) = test_support::signed_in(&pool).await.unwrap();
         let (_bob, bob_cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &alice_cookie).await;
@@ -691,7 +691,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn complete_invalid_segments_422(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (alice, alice_cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &alice_cookie).await;
         let other = create_project(&app, &alice_cookie).await;
@@ -791,7 +791,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn release_by_non_owner_409(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (alice, alice_cookie) = test_support::signed_in(&pool).await.unwrap();
         let (_bob, bob_cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &alice_cookie).await;
@@ -901,7 +901,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn reopen_resets_to_in_progress(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (alice, alice_cookie) = test_support::signed_in(&pool).await.unwrap();
         let (bob, bob_cookie) = test_support::signed_in(&pool).await.unwrap();
         let project = create_project(&app, &alice_cookie).await;

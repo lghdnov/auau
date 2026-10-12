@@ -153,7 +153,7 @@ mod tests {
     #[tokio::test]
     async fn media_requires_auth() {
         let pool = PgPool::connect_lazy("postgres://localhost/auau").unwrap();
-        let app = crate::api::router(test_support::state(pool));
+        let app = crate::api::build_router(test_support::state(pool));
         let id = uuid::Uuid::new_v4();
 
         for uri in [format!("/media/{id}"), format!("/media/{id}/peaks")] {
@@ -169,7 +169,7 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn range_request_returns_exact_bytes(pool: PgPool) {
         let state = test_support::state(pool.clone());
-        let app = crate::api::router(state.clone());
+        let app = crate::api::build_router(state.clone());
         let (user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let file_id = insert_file(&pool, user.id, FileStatus::New).await;
         let bytes = kilobyte();
@@ -206,7 +206,7 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn full_file_returns_200(pool: PgPool) {
         let state = test_support::state(pool.clone());
-        let app = crate::api::router(state.clone());
+        let app = crate::api::build_router(state.clone());
         let (user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let file_id = insert_file(&pool, user.id, FileStatus::New).await;
         let bytes = kilobyte();
@@ -236,7 +236,7 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn peaks_ready_returns_binary(pool: PgPool) {
         let state = test_support::state(pool.clone());
-        let app = crate::api::router(state.clone());
+        let app = crate::api::build_router(state.clone());
         let (user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let file_id = insert_file(&pool, user.id, FileStatus::New).await;
 
@@ -276,7 +276,7 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn peaks_processing_returns_404(pool: PgPool) {
         let state = test_support::state(pool.clone());
-        let app = crate::api::router(state.clone());
+        let app = crate::api::build_router(state.clone());
         let (user, cookie) = test_support::signed_in(&pool).await.unwrap();
         let file_id = insert_file(&pool, user.id, FileStatus::Processing).await;
 
@@ -303,7 +303,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn media_missing_file_404(pool: PgPool) {
-        let app = crate::api::router(test_support::state(pool.clone()));
+        let app = crate::api::build_router(test_support::state(pool.clone()));
         let (user, cookie) = test_support::signed_in(&pool).await.unwrap();
 
         let file_id = insert_file(&pool, user.id, FileStatus::New).await;
