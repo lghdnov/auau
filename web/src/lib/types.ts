@@ -6,13 +6,16 @@
  * в camelCase.
  */
 
-/** Пользователь, синхронизированный из OIDC-клеймов (GET /api/v1/me). */
+/**
+ * Идентичность вошедшего пользователя (GET /api/v1/me).
+ *
+ * Ровно три поля, как их отдаёт хендлер: oidc_subject и created_at
+ * никогда не сериализуются (app/src/api/mod.rs, `me`).
+ */
 export interface User {
 	id: string;
-	oidc_subject: string;
 	name: string;
 	email: string;
-	created_at: string;
 }
 
 /** Проект разметки. */

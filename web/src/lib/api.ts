@@ -43,7 +43,7 @@ async function toApiError(res: Response): Promise<ApiError> {
 
 /** fetch с сессией; не-2xx превращается в ApiError. */
 async function raw(path: string, init?: RequestInit): Promise<Response> {
-	const res = await fetch(path, { credentials: 'same-origin', ...init });
+	const res = await fetch(path, { ...init, credentials: 'same-origin' });
 	if (!res.ok) throw await toApiError(res);
 	return res;
 }
@@ -147,7 +147,11 @@ export const api = {
 			method: 'POST',
 			body: form
 		});
-		return results[0];
+		const [result] = results;
+		if (!result) {
+			throw new ApiError('empty_upload_result', 'upload returned no results');
+		}
+		return result;
 	},
 
 	/** Удалить файл (204 без тела). */

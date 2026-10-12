@@ -64,13 +64,7 @@ describe('api', () => {
 
 	it('me_parses_user', async () => {
 		const fetchMock = mockFetch();
-		const user = {
-			id: 'u1',
-			oidc_subject: 'pocketid|1',
-			name: 'Тест Тестов',
-			email: 't@example.org',
-			created_at: '2026-10-04T00:00:00Z'
-		};
+		const user = { id: 'u1', name: 'Тест Тестов', email: 't@example.org' };
 		fetchMock.mockResolvedValueOnce(jsonResponse(200, user));
 
 		await expect(api.me()).resolves.toEqual(user);
@@ -113,6 +107,18 @@ describe('api', () => {
 		expect(init?.method).toBe('POST');
 		expect(init?.body).toBeInstanceOf(FormData);
 		expect((init?.body as FormData).get('file')).toBeInstanceOf(File);
+	});
+
+	it('upload_empty_results_throws_api_error', async () => {
+		const fetchMock = mockFetch();
+		fetchMock.mockResolvedValueOnce(jsonResponse(201, []));
+
+		const thrown = await api
+			.uploadFile('p1', new File([new Uint8Array()], 'a.wav'))
+			.catch((err: unknown) => err);
+
+		expect(thrown).toBeInstanceOf(ApiError);
+		expect((thrown as ApiError).code).toBe('empty_upload_result');
 	});
 
 	it('error_without_json_body_falls_back_to_http_code', async () => {
