@@ -16,8 +16,8 @@ function result(name: string, status: UploadResult['status'], message: string | 
 describe('runUploadQueue', () => {
 	it('queue_continues_after_duplicate_and_error', async () => {
 		const files = [file('a.wav'), file('b.wav'), file('c.wav')];
-		const duplicate = result('b.wav', 'duplicate', 'duplicate of existing file');
 		const accepted = result('a.wav', 'accepted', null);
+		const duplicate = result('c.wav', 'duplicate', 'duplicate of existing file');
 
 		let active = 0;
 		let maxActive = 0;
@@ -25,8 +25,9 @@ describe('runUploadQueue', () => {
 			active++;
 			maxActive = Math.max(maxActive, active);
 			try {
-				if (f.name === 'b.wav') return duplicate;
-				if (f.name === 'c.wav') throw new ApiError('http_502', 'bad gateway');
+				await Promise.resolve();
+				if (f.name === 'b.wav') throw new ApiError('http_502', 'bad gateway');
+				if (f.name === 'c.wav') return duplicate;
 				return accepted;
 			} finally {
 				active--;
@@ -44,7 +45,7 @@ describe('runUploadQueue', () => {
 
 		expect(onResult).toHaveBeenCalledTimes(3);
 		expect(onResult).toHaveBeenNthCalledWith(1, files[0], accepted);
-		expect(onResult).toHaveBeenNthCalledWith(2, files[1], duplicate);
-		expect(onResult).toHaveBeenNthCalledWith(3, files[2], 'error', 'bad gateway');
+		expect(onResult).toHaveBeenNthCalledWith(2, files[1], 'error', 'bad gateway');
+		expect(onResult).toHaveBeenNthCalledWith(3, files[2], duplicate);
 	});
 });
