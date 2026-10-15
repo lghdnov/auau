@@ -134,14 +134,22 @@
 		if (session) markDirty(session);
 	}
 
-	/** Правка начала: клампим в [0, end-1]; пустой ввод откатывается. */
+	/** Парсинг числа из инпута: NaN/∞ — правка игнорируется. */
+	function parseMs(raw: string): number | null {
+		const n = Number(raw);
+		return Number.isFinite(n) ? Math.round(n) : null;
+	}
+
+	/** Правка начала: клампим в [0, end-1]; пустой/нечисловой ввод откатывается. */
 	function editStart(seg: Segment, ev: Event): void {
 		const input = ev.target as HTMLInputElement;
-		if (input.value.trim() === '') {
+		const raw = input.value.trim();
+		const parsed = raw === '' ? null : parseMs(raw);
+		if (parsed === null) {
 			input.value = String(seg.start_ms);
 			return;
 		}
-		const start = Math.max(0, Math.min(Math.round(Number(input.value)), seg.end_ms - 1));
+		const start = Math.max(0, Math.min(parsed, seg.end_ms - 1));
 		input.value = String(start);
 		model.updateSegment(seg.uid, { start_ms: start });
 		wave?.syncRegion(seg.uid, { startMs: start });
@@ -150,11 +158,13 @@
 
 	function editEnd(seg: Segment, ev: Event): void {
 		const input = ev.target as HTMLInputElement;
-		if (input.value.trim() === '') {
+		const raw = input.value.trim();
+		const parsed = raw === '' ? null : parseMs(raw);
+		if (parsed === null) {
 			input.value = String(seg.end_ms);
 			return;
 		}
-		const end = Math.max(seg.start_ms + 1, Math.min(Math.round(Number(input.value)), durationMs));
+		const end = Math.max(seg.start_ms + 1, Math.min(parsed, durationMs));
 		input.value = String(end);
 		model.updateSegment(seg.uid, { end_ms: end });
 		wave?.syncRegion(seg.uid, { endMs: end });
@@ -245,6 +255,7 @@
 					wave = created;
 
 					created.onRegionCreated((startMs, endMs) => {
+						if (completing) return null;
 						if (!model.selectedLabelId) return null;
 						const seg = model.addSegment(model.selectedLabelId, startMs, endMs);
 						selectedUid = seg.uid;
@@ -285,13 +296,17 @@
 		};
 	});
 
+	$effect(() => {
+		if (leaseLost) wave?.pause();
+	});
+
 	onMount(() => {
 		function onKeydown(e: KeyboardEvent): void {
 			if (e.key === 'Escape' && confirmEmpty) {
 				confirmEmpty = false;
 				return;
 			}
-			if (leaseLost) return;
+			if (leaseLost || completing) return;
 			const action: HotkeyAction | null = hotkeyForEvent(e, data.labels);
 			if (!action) return;
 			e.preventDefault();

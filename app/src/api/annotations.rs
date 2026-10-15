@@ -21,8 +21,15 @@ use crate::models::{AudioFile, Label};
 use crate::validate::{validate_segments, SegmentInput};
 
 /// Annotation routes; both require a signed-in user.
+///
+/// POST is an alias of PUT for `navigator.sendBeacon`, which cannot send
+/// PUT: the browser's beforeunload flush posts the exact same camelCase
+/// body, so it goes through the same [`replace`] handler and lease checks.
 pub fn router() -> Router<AppState> {
-    Router::new().route("/api/v1/files/{id}/annotations", get(list).put(replace))
+    Router::new().route(
+        "/api/v1/files/{id}/annotations",
+        get(list).put(replace).post(replace),
+    )
 }
 
 /// A stored segment as it travels over the wire: snake_case (unlike the
@@ -454,6 +461,70 @@ mod tests {
 
         let rows = stored_segments(&pool, file).await;
         assert_eq!(rows, vec![(label_b, 5_000, 6_000, alice.id)]);
+    }
+
+    /// POST is the sendBeacon alias of PUT (the browser's beforeunload flush
+    /// cannot send PUT): the same camelCase body replaces all segments and
+    /// the lease rules apply unchanged.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn post_alias_replaces_segments_and_requires_lease(pool: PgPool) {
+        let app = crate::api::build_router(test_support::state(pool.clone()));
+        let (alice, alice_cookie) = test_support::signed_in(&pool).await.unwrap();
+        let project = create_project(&app, &alice_cookie).await;
+        let label_a = insert_label(&pool, project).await;
+        let label_b = insert_label(&pool, project).await;
+        let file = claimed_file(&pool, project, alice.id, Some(60_000)).await;
+
+        insert_annotation(&pool, file, label_a, 0, 1_000, alice.id).await;
+
+        let beacon_body = json!([
+            {"labelId": label_b.to_string(), "startMs": 2_000, "endMs": 3_000},
+        ]);
+        let (status, body) = test_support::json(
+            app.clone()
+                .oneshot(test_support::post_json(
+                    &format!("/api/v1/files/{file}/annotations"),
+                    &alice_cookie,
+                    beacon_body,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body.as_array().unwrap().len(), 1, "{body}");
+        assert_eq!(body[0]["label_id"], json!(label_b.to_string()));
+        assert_eq!(body[0]["start_ms"], json!(2_000));
+        assert_eq!(body[0]["end_ms"], json!(3_000));
+        assert_eq!(
+            stored_segments(&pool, file).await,
+            vec![(label_b, 2_000, 3_000, alice.id)]
+        );
+
+        let fresh = insert_file(
+            &pool,
+            project,
+            alice.id,
+            FileStatus::New,
+            None,
+            None,
+            Some(60_000),
+        )
+        .await;
+        let (status, body) = test_support::json(
+            app.clone()
+                .oneshot(test_support::post_json(
+                    &format!("/api/v1/files/{fresh}/annotations"),
+                    &alice_cookie,
+                    json!([{"labelId": label_b.to_string(), "startMs": 0, "endMs": 1_000}]),
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(body["error"]["code"], json!("lease_required"));
+        assert_eq!(stored_segments(&pool, fresh).await, vec![]);
     }
 
     #[sqlx::test(migrations = "./migrations")]
