@@ -38,7 +38,16 @@
 		autosaver: Autosaver;
 	}
 
+	interface ModelView {
+		segments: Segment[];
+		selectedLabelId: string | null;
+	}
+	let view = $state<ModelView>({ segments: [], selectedLabelId: null });
 	let model: AnnotationState = $state(new AnnotationState());
+	function syncView(st: AnnotationState): void {
+		view.segments = [...st.segments];
+		view.selectedLabelId = st.selectedLabelId;
+	}
 	let dirty = $state(false);
 	let currentMs = $state(0);
 	let playing = $state(false);
@@ -119,6 +128,7 @@
 
 	function selectLabel(id: string): void {
 		model.selectLabel(id);
+		syncView(model);
 		wave?.setDrawColor(colorOf(id));
 	}
 
@@ -129,6 +139,7 @@
 
 	function removeSegment(uid: string): void {
 		model.removeSegment(uid);
+		syncView(model);
 		wave?.removeRegion(uid);
 		if (selectedUid === uid) selectedUid = null;
 		if (session) markDirty(session);
@@ -152,6 +163,7 @@
 		const start = Math.max(0, Math.min(parsed, seg.end_ms - 1));
 		input.value = String(start);
 		model.updateSegment(seg.uid, { start_ms: start });
+		syncView(model);
 		wave?.syncRegion(seg.uid, { startMs: start });
 		if (session) markDirty(session);
 	}
@@ -167,6 +179,7 @@
 		const end = Math.max(seg.start_ms + 1, Math.min(parsed, durationMs));
 		input.value = String(end);
 		model.updateSegment(seg.uid, { end_ms: end });
+		syncView(model);
 		wave?.syncRegion(seg.uid, { endMs: end });
 		if (session) markDirty(session);
 	}
@@ -230,6 +243,7 @@
 
 		session = s;
 		model = st;
+		syncView(st);
 		dirty = false;
 		selectedUid = null;
 		currentMs = 0;
@@ -259,11 +273,13 @@
 						if (!model.selectedLabelId) return null;
 						const seg = model.addSegment(model.selectedLabelId, startMs, endMs);
 						selectedUid = seg.uid;
+						syncView(model);
 						markDirty(s);
 						return seg.uid;
 					});
 					created.onRegionDragged((uid, startMs, endMs) => {
 						model.updateSegment(uid, { start_ms: startMs, end_ms: endMs });
+						syncView(model);
 						markDirty(s);
 					});
 					created.onRegionClicked((uid) => {
@@ -391,7 +407,7 @@
 		{#each labels as label (label.id)}
 			<button
 				class="label"
-				class:active={model.selectedLabelId === label.id}
+				class:active={view.selectedLabelId === label.id}
 				onclick={() => selectLabel(label.id)}
 				title={label.hotkey ? `Клавиша ${label.hotkey}` : undefined}
 			>
@@ -402,12 +418,12 @@
 		{/each}
 		{#if labels.length === 0}
 			<p class="hint">В проекте нет активных меток — создайте их на дашборде проекта.</p>
-		{:else if !model.selectedLabelId}
+		{:else if !view.selectedLabelId}
 			<p class="hint">Выберите метку и протяните по волне, чтобы создать сегмент.</p>
 		{/if}
 	</div>
 
-	{#if model.segments.length === 0}
+	{#if view.segments.length === 0}
 		<p class="hint">Сегментов пока нет.</p>
 	{:else}
 		<table class="segments">
@@ -423,7 +439,7 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#each [...model.segments].sort((a, b) => a.start_ms - b.start_ms) as seg (seg.uid)}
+				{#each [...view.segments].sort((a, b) => a.start_ms - b.start_ms) as seg (seg.uid)}
 					<tr
 						class:selected={selectedUid === seg.uid}
 						onclick={() => rowClick(seg)}
