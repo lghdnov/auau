@@ -213,6 +213,24 @@ impl CodeExchanger for PocketIdExchanger {
     }
 }
 
+/// E2E-only stand-in for the production exchanger (feature `e2e-auth-bypass`).
+///
+/// The Playwright stack runs without any IdP, so startup skips OIDC discovery
+/// and this exchanger takes its place: a code exchange can never succeed —
+/// sessions come from `POST /api/v1/auth/dev-login` instead.
+#[cfg(feature = "e2e-auth-bypass")]
+pub struct NoIdpExchanger;
+
+#[cfg(feature = "e2e-auth-bypass")]
+#[async_trait]
+impl CodeExchanger for NoIdpExchanger {
+    async fn exchange(&self, _code: &str, _verifier: &str) -> Result<ExchangedUser, AppError> {
+        Err(AppError::Internal(anyhow::anyhow!(
+            "OIDC login is unavailable in e2e builds; use /api/v1/auth/dev-login"
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

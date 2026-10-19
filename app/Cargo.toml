@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.83"
 
+[features]
+
+e2e-auth-bypass = []
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1.92"

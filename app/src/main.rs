@@ -2,13 +2,18 @@ use std::sync::Arc;
 
 use auau::{
     api::{self, AppState},
-    auth::oidc::{OidcSettings, PocketIdExchanger},
+    auth::oidc::{CodeExchanger, OidcSettings},
     auth::session::SessionSecret,
     config::Config,
     db,
     jobs::{self, JobQueue},
     media::store::MediaStore,
 };
+
+#[cfg(not(feature = "e2e-auth-bypass"))]
+use auau::auth::oidc::PocketIdExchanger;
+#[cfg(feature = "e2e-auth-bypass")]
+use auau::auth::oidc::NoIdpExchanger;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -42,12 +47,20 @@ async fn main() -> anyhow::Result<()> {
 
     let max_upload_bytes = config.max_upload_bytes();
 
-    let exchanger = PocketIdExchanger::from_config(&config).await?;
+    #[cfg(not(feature = "e2e-auth-bypass"))]
+    let (exchanger, end_session_url) = {
+        let exchanger = PocketIdExchanger::from_config(&config).await?;
+        let end_session_url = exchanger.end_session_url();
+        (Arc::new(exchanger) as Arc<dyn CodeExchanger>, end_session_url)
+    };
+    #[cfg(feature = "e2e-auth-bypass")]
+    let (exchanger, end_session_url): (Arc<dyn CodeExchanger>, Option<String>) =
+        (Arc::new(NoIdpExchanger), None);
     let state = AppState {
         pool,
-        oidc: OidcSettings::new(&config, exchanger.end_session_url()),
+        oidc: OidcSettings::new(&config, end_session_url),
         session_secret: SessionSecret::new(config.session_secret),
-        exchanger: Arc::new(exchanger),
+        exchanger,
         store,
         jobs,
         max_upload_bytes,

@@ -3,6 +3,8 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
+#[cfg(feature = "e2e-auth-bypass")]
+use axum::Json;
 use chrono::Utc;
 use serde::Deserialize;
 
@@ -25,10 +27,55 @@ const SESSION_COOKIE_MAX_AGE: u32 = 12 * 3600;
 
 /// Public authentication routes (no `CurrentUser` required).
 pub fn router() -> Router<AppState> {
-    Router::new()
+    let router = Router::new()
         .route("/api/v1/auth/login", get(login))
         .route("/api/v1/auth/callback", get(callback))
-        .route("/api/v1/auth/logout", post(logout))
+        .route("/api/v1/auth/logout", post(logout));
+    #[cfg(feature = "e2e-auth-bypass")]
+    let router = router.route("/api/v1/auth/dev-login", post(dev_login));
+    router
+}
+
+/// Body of the e2e-only `POST /api/v1/auth/dev-login`.
+#[cfg(feature = "e2e-auth-bypass")]
+#[derive(Debug, Deserialize)]
+struct DevLoginBody {
+    name: String,
+}
+
+/// E2E-only login for the Playwright stack (feature `e2e-auth-bypass`):
+/// upsert the named user with a stable `e2e-{name}` subject and mint the
+/// session cookie exactly as the OIDC callback would. No IdP is involved.
+#[cfg(feature = "e2e-auth-bypass")]
+async fn dev_login(
+    State(state): State<AppState>,
+    Json(body): Json<DevLoginBody>,
+) -> Result<Response, AppError> {
+    let name = body.name.trim();
+    if name.is_empty() {
+        return Err(AppError::BadRequest {
+            code: "invalid_name".into(),
+            message: "name must not be empty or whitespace".into(),
+        });
+    }
+
+    let user = users::upsert(&state.pool, &format!("e2e-{name}"), name, "e2e@test.local").await?;
+    let token = session::issue(user.id, &state.session_secret, Utc::now().timestamp());
+    let session_cookie = format!(
+        "{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_COOKIE_MAX_AGE}"
+    );
+    let mut headers = HeaderMap::new();
+    headers.append(header::SET_COOKIE, set_cookie(&session_cookie)?);
+    Ok((
+        StatusCode::OK,
+        headers,
+        Json(serde_json::json!({
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+        })),
+    )
+        .into_response())
 }
 
 /// Start the OIDC flow: redirect to the authorize URL and stash
@@ -430,5 +477,90 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         assert_eq!(cookie_value(&set_cookies(&response), SESSION_COOKIE), "");
+    }
+
+    /// Dev-login tests exist only in `e2e-auth-bypass` builds — run with
+    /// `cargo test --features e2e-auth-bypass`. The inverse (the route 404s
+    /// WITHOUT the feature) cannot be asserted in the same build: the route
+    /// is `#[cfg]`-compiled out, so a no-feature binary never registers it.
+    #[cfg(feature = "e2e-auth-bypass")]
+    mod dev_login {
+        use super::*;
+        use axum::body::Body;
+        use axum::http::Request;
+        use sqlx::PgPool;
+        use tower::ServiceExt;
+
+        #[sqlx::test(migrations = "./migrations")]
+        async fn dev_login_upserts_user_and_sets_session(pool: PgPool) {
+            let app = crate::api::build_router(state(pool.clone()));
+
+            for _ in 0..2 {
+                let response = app
+                    .clone()
+                    .oneshot(
+                        Request::post("/api/v1/auth/dev-login")
+                            .header(header::CONTENT_TYPE, "application/json")
+                            .body(Body::from(r#"{"name":"E2E"}"#))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                assert_eq!(response.status(), StatusCode::OK);
+                let cookies = set_cookies(&response);
+                let token = cookie_value(&cookies, SESSION_COOKIE);
+                assert!(!token.is_empty());
+                let raw_cookie = cookies
+                    .iter()
+                    .find(|cookie| cookie.starts_with(&format!("{SESSION_COOKIE}=")))
+                    .unwrap();
+                assert!(raw_cookie.contains("HttpOnly"), "{raw_cookie}");
+                assert!(raw_cookie.contains("SameSite=Lax"), "{raw_cookie}");
+                assert!(raw_cookie.contains("Max-Age=43200"), "{raw_cookie}");
+
+                let me = app
+                    .clone()
+                    .oneshot(
+                        Request::get("/api/v1/me")
+                            .header(header::COOKIE, format!("{SESSION_COOKIE}={token}"))
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(me.status(), StatusCode::OK);
+                let bytes = axum::body::to_bytes(me.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(body["name"], serde_json::json!("E2E"));
+                assert_eq!(body["email"], serde_json::json!("e2e@test.local"));
+            }
+
+            let subjects: Vec<String> =
+                sqlx::query_scalar("SELECT oidc_subject FROM users ORDER BY oidc_subject")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(subjects, vec!["e2e-E2E".to_string()]);
+        }
+
+        #[sqlx::test(migrations = "./migrations")]
+        async fn dev_login_rejects_blank_name(pool: PgPool) {
+            let app = crate::api::build_router(state(pool));
+
+            let response = app
+                .oneshot(
+                    Request::post("/api/v1/auth/dev-login")
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(r#"{"name":"   "}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
     }
 }

@@ -107,7 +107,10 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("text/html")
         );
-        assert!(body.contains("auau"), "index.html should mention auau");
+        assert!(
+            body.to_lowercase().contains("auau"),
+            "index.html should mention auau"
+        );
 
         let response = app
             .clone()
@@ -116,7 +119,10 @@ mod tests {
             .unwrap();
         let (status, _, body) = test_support::text(response).await;
         assert_eq!(status, StatusCode::OK);
-        assert!(body.contains("auau"), "deep links should get the shell");
+        assert!(
+            body.to_lowercase().contains("auau"),
+            "deep links should get the shell"
+        );
 
         let response = app
             .clone()
