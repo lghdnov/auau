@@ -1,0 +1,12 @@
+.git
+.superpowers
+data
+data-e2e
+**/node_modules
+app/target
+web/dist
+web/.svelte-kit
+web/test-results
+web/playwright-report
+.DS_Store
+**/.DS_Store
