@@ -4,7 +4,7 @@ import type { FileCounts } from './types';
 
 /** counts со всеми нулями, кроме перечисленных полей. */
 function counts(partial: Partial<FileCounts>): FileCounts {
-	return { new: 0, in_progress: 0, done: 0, error: 0, ...partial };
+	return { new: 0, in_progress: 0, done: 0, error: 0, processing: 0, ...partial };
 }
 
 describe('progressPercent', () => {
@@ -18,6 +18,13 @@ describe('progressPercent', () => {
 
 	it('counts_every_status_in_total', () => {
 		expect(progressPercent(counts({ new: 1, in_progress: 1, done: 1, error: 1 }))).toBe(25);
+	});
+
+	it('processing_counts_in_total', () => {
+		expect(
+			progressPercent(counts({ new: 1, in_progress: 1, done: 1, error: 1, processing: 1 }))
+		).toBe(20);
+		expect(progressPercent(counts({ done: 1, processing: 1 }))).toBe(50);
 	});
 
 	it('in_progress_and_error_are_not_done', () => {

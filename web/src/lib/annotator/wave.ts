@@ -13,20 +13,38 @@ const PEAKS_VERSION = 1;
 const PEAKS_HEADER_LEN = 14;
 const PEAKS_PAIR_LEN = 4;
 
-/** Overview-уровень пиков, нормализованный в −1..1 (для опции peaks). */
+/** Один уровень пиков (overview или detail), нормализованный в −1..1. */
 export interface PeaksArrays {
 	min: number[];
 	max: number[];
 }
 
+/** Оба уровня пиков: overview — весь файл, detail — 100 бак/с для зума. */
+export interface DecodedPeaks {
+	overview: PeaksArrays;
+	detail: PeaksArrays;
+}
+
+/** Прочитать `count` пар `[min i16, max i16]` с `offset`, деля на 32768. */
+function readPairs(view: DataView, offset: number, count: number): PeaksArrays {
+	const min: number[] = [];
+	const max: number[] = [];
+	for (let i = 0; i < count; i++) {
+		const off = offset + i * PEAKS_PAIR_LEN;
+		min.push(view.getInt16(off, true) / 32768);
+		max.push(view.getInt16(off + 2, true) / 32768);
+	}
+	return { min, max };
+}
+
 /**
  * Разобрать бинарник `GET /media/:id/peaks`: заголовок
  * `magic u32 | version u16 | overview_count u32 | detail_count u32`,
- * затем пары `[min i16, max i16]` overview-уровня и detail-уровень.
- * Возвращает overview, делённый на 32768; битый буфер бросает Error
+ * затем пары `[min i16, max i16]` overview-уровня и detail-уровня (100 бак/с).
+ * Возвращает оба уровня, делённые на 32768; битый буфер бросает Error
  * (по мотивам PeaksError::BadMagic/BadVersion/Truncated на бэкенде).
  */
-export function decodePeaks(buf: ArrayBuffer): PeaksArrays {
+export function decodePeaks(buf: ArrayBuffer): DecodedPeaks {
 	if (buf.byteLength < PEAKS_HEADER_LEN) throw new Error('peaks data is truncated (header)');
 	const view = new DataView(buf);
 	if (view.getUint32(0, true) !== PEAKS_MAGIC) throw new Error('peaks data has a bad magic value');
@@ -38,14 +56,25 @@ export function decodePeaks(buf: ArrayBuffer): PeaksArrays {
 	const declared = 14 + (overviewCount + detailCount) * PEAKS_PAIR_LEN;
 	if (buf.byteLength < declared) throw new Error('peaks data is truncated (payload)');
 
-	const min: number[] = [];
-	const max: number[] = [];
-	for (let i = 0; i < overviewCount; i++) {
-		const off = PEAKS_HEADER_LEN + i * PEAKS_PAIR_LEN;
-		min.push(view.getInt16(off, true) / 32768);
-		max.push(view.getInt16(off + 2, true) / 32768);
-	}
-	return { min, max };
+	const overview = readPairs(view, PEAKS_HEADER_LEN, overviewCount);
+	const detail = readPairs(view, PEAKS_HEADER_LEN + overviewCount * PEAKS_PAIR_LEN, detailCount);
+	return { overview, detail };
+}
+
+/** Границы масштаба, px/с. */
+export const ZOOM_MIN_PX_PER_SEC = 5;
+export const ZOOM_MAX_PX_PER_SEC = 200;
+/** Шаг зума: одно колесо/нажатие кнопки меняет масштаб в 1.25 раза. */
+export const ZOOM_STEP = 1.25;
+
+/** Прижать px/с к допустимым границам. */
+export function clampZoom(pxPerSec: number): number {
+	return Math.min(ZOOM_MAX_PX_PER_SEC, Math.max(ZOOM_MIN_PX_PER_SEC, pxPerSec));
+}
+
+/** Следующее значение масштаба: ×1.25 при dir=1, ÷1.25 при dir=-1, с clamp. */
+export function zoomStep(pxPerSec: number, dir: 1 | -1): number {
+	return clampZoom(pxPerSec * (dir === 1 ? ZOOM_STEP : 1 / ZOOM_STEP));
 }
 
 /** Цвет региона: полупрозрачная заливка, чтобы волна под ним читалась. */
@@ -67,7 +96,13 @@ export interface Wave {
 	/** Инстанс wavesurfer для мелочей вне обёртки (события play/pause и т.п.). */
 	readonly ws: WaveSurfer;
 	/** Нарисовать регион сегмента; id региона = uid сегмента. */
-	addRegion(uid: string, startMs: number, endMs: number, color: string): void;
+	addRegion(
+		uid: string,
+		startMs: number,
+		endMs: number,
+		color: string,
+		options?: { editable?: boolean }
+	): void;
 	/** Подтянуть границы региона за сегментом, правленным в списке. */
 	syncRegion(uid: string, patch: WaveRegionPatch): void;
 	/** Убрать регион (сегмент удалён). */
@@ -87,6 +122,10 @@ export interface Wave {
 	pause(): void;
 	/** Скорость воспроизведения 0.5–2×. */
 	setRate(rate: number): void;
+	/** Приблизить на один шаг ×1.25 (колесо вверх / кнопка +). */
+	zoomIn(): void;
+	/** Отдалить на один шаг ÷1.25 (колесо вниз / кнопка −). */
+	zoomOut(): void;
 	/** Полный демонтаж (unsubscribe + destroy wavesurfer). */
 	onDestroy(): void;
 }
@@ -104,8 +143,9 @@ export async function createWave(
 ): Promise<Wave> {
 	const res = await fetch(peaksUrl);
 	if (!res.ok) throw new Error(`Не удалось загрузить пики (HTTP ${res.status})`);
-	const { min, max } = decodePeaks(await res.arrayBuffer());
-	if (min.length === 0) throw new Error('Пики пусты — нечего рисовать');
+	const { overview, detail } = decodePeaks(await res.arrayBuffer());
+	const level = detail.min.length > 0 ? detail : overview;
+	if (level.min.length === 0) throw new Error('Пики пусты — нечего рисовать');
 
 	const regions = RegionsPlugin.create();
 	const ws = WaveSurfer.create({
@@ -117,7 +157,28 @@ export async function createWave(
 		plugins: [regions]
 	});
 
-	await ws.load(mediaUrl, [max, min], durationMs / 1000);
+	await ws.load(mediaUrl, [level.max, level.min], durationMs / 1000);
+
+	let zoomPxPerSec: number | null = null;
+
+	function effectivePxPerSec(): number {
+		if (zoomPxPerSec !== null) return zoomPxPerSec;
+		const durationSec = ws.getDuration();
+		if (!durationSec || container.clientWidth === 0) return ZOOM_MIN_PX_PER_SEC;
+		return clampZoom(container.clientWidth / durationSec);
+	}
+
+	function applyZoom(dir: 1 | -1): void {
+		zoomPxPerSec = zoomStep(effectivePxPerSec(), dir);
+		ws.zoom(zoomPxPerSec);
+	}
+
+	function onWheel(event: WheelEvent): void {
+		if (event.deltaY === 0) return;
+		event.preventDefault();
+		applyZoom(event.deltaY < 0 ? 1 : -1);
+	}
+	container.addEventListener('wheel', onWheel, { passive: false });
 
 	const byUid = new Map<string, Region>();
 	const programmatic = new Set<string>();
@@ -152,8 +213,9 @@ export async function createWave(
 
 	return {
 		ws,
-		addRegion(uid, startMs, endMs, color) {
+		addRegion(uid, startMs, endMs, color, options) {
 			if (byUid.has(uid)) return;
+			const editable = options?.editable ?? true;
 			programmatic.add(uid);
 			try {
 				const region = regions.addRegion({
@@ -161,8 +223,8 @@ export async function createWave(
 					start: startMs / 1000,
 					end: endMs / 1000,
 					color: regionColor(color),
-					drag: true,
-					resize: true
+					drag: editable,
+					resize: editable
 				});
 				byUid.set(uid, region);
 			} finally {
@@ -214,7 +276,14 @@ export async function createWave(
 		setRate(rate) {
 			ws.setPlaybackRate(rate);
 		},
+		zoomIn() {
+			applyZoom(1);
+		},
+		zoomOut() {
+			applyZoom(-1);
+		},
 		onDestroy() {
+			container.removeEventListener('wheel', onWheel);
 			ws.destroy();
 			byUid.clear();
 		}

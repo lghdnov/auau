@@ -76,12 +76,13 @@ export interface SegmentInput {
 	endMs: number;
 }
 
-/** Счётчики файлов проекта по статусам (`processing` не показывается). */
+/** Счётчики файлов проекта по статусам (processing — своя метка «Обработка»). */
 export interface FileCounts {
 	new: number;
 	in_progress: number;
 	done: number;
 	error: number;
+	processing: number;
 }
 
 /** Проект в списке дашборда: строка + счётчики файлов. */

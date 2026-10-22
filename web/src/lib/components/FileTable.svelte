@@ -4,7 +4,7 @@
 
 	let { files }: { files: AudioFile[] } = $props();
 
-	/** Русские подписи статусов; processing в счётчиках не участвует, но в списке бывает. */
+	/** Русские подписи статусов (processing — файлы на подготовке медиа). */
 	const STATUS_LABELS: Record<FileStatus, string> = {
 		processing: 'Обработка',
 		new: 'Новый',

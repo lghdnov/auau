@@ -4,7 +4,9 @@
 
 	let { counts }: { counts: FileCounts } = $props();
 
-	const total = $derived(counts.new + counts.in_progress + counts.done + counts.error);
+	const total = $derived(
+		counts.new + counts.in_progress + counts.done + counts.error + counts.processing
+	);
 	const percent = $derived(progressPercent(counts));
 </script>
 
@@ -12,6 +14,7 @@
 	<div class="stats">
 		<span>Новые: {counts.new}</span>
 		<span>В работе: {counts.in_progress}</span>
+		<span>Обработка: {counts.processing}</span>
 		<span>Готово: {counts.done}</span>
 		<span>Ошибки: {counts.error}</span>
 		<span class="total">Готово {counts.done} из {total} ({percent}%)</span>

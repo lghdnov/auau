@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { decodePeaks } from './wave';
+import {
+	clampZoom,
+	decodePeaks,
+	ZOOM_MAX_PX_PER_SEC,
+	ZOOM_MIN_PX_PER_SEC,
+	zoomStep
+} from './wave';
 
 /** Минимальный аналог app/src/media/peaks.rs::encode — только для тестов. */
 function encode(
@@ -33,15 +39,42 @@ describe('decodePeaks', () => {
 			],
 			[[-5, 5]]
 		);
-		const { min, max } = decodePeaks(buf);
-		expect(min).toEqual([-1000 / 32768, -1]);
-		expect(max).toEqual([2000 / 32768, 32767 / 32768]);
+		const { overview } = decodePeaks(buf);
+		expect(overview.min).toEqual([-1000 / 32768, -1]);
+		expect(overview.max).toEqual([2000 / 32768, 32767 / 32768]);
+	});
+
+	it('возвращает detail-уровень (100 бак/с): длина = duration_s × 100', () => {
+		const detail: [number, number][] = Array.from({ length: 300 }, (_, i) => [-i, i]);
+		const buf = encode([[-100, 100]], detail);
+		const { detail: d } = decodePeaks(buf);
+		expect(d.min).toHaveLength(300);
+		expect(d.max).toHaveLength(300);
+		expect(d.min[0]).toBe(0 / 32768);
+		expect(d.max[299]).toBe(299 / 32768);
+	});
+
+	it('detail читается со сдвигом за overview', () => {
+		const buf = encode(
+			[
+				[-1, 1],
+				[-2, 2]
+			],
+			[
+				[-30, 30],
+				[-40, 40]
+			]
+		);
+		const { overview, detail } = decodePeaks(buf);
+		expect(overview.min).toEqual([-1 / 32768, -2 / 32768]);
+		expect(detail.min).toEqual([-30 / 32768, -40 / 32768]);
+		expect(detail.max).toEqual([30 / 32768, 40 / 32768]);
 	});
 
 	it('пустой overview — пустые массивы', () => {
-		const { min, max } = decodePeaks(encode([], [[1, 2]]));
-		expect(min).toEqual([]);
-		expect(max).toEqual([]);
+		const { overview } = decodePeaks(encode([], [[1, 2]]));
+		expect(overview.min).toEqual([]);
+		expect(overview.max).toEqual([]);
 	});
 
 	it('неверный magic — ошибка', () => {
@@ -67,5 +100,21 @@ describe('decodePeaks', () => {
 		]);
 		const truncated = full.slice(0, full.byteLength - 4);
 		expect(() => decodePeaks(truncated)).toThrow(/trunc/i);
+	});
+});
+
+describe('zoomStep / clampZoom', () => {
+	it('шаг ×1.25 вверх и ÷1.25 вниз', () => {
+		expect(zoomStep(100, 1)).toBe(125);
+		expect(zoomStep(100, -1)).toBe(80);
+		expect(zoomStep(80, 1)).toBe(100);
+	});
+
+	it('clamp на границах 5 и 200 px/с', () => {
+		expect(zoomStep(200, 1)).toBe(ZOOM_MAX_PX_PER_SEC);
+		expect(zoomStep(5, -1)).toBe(ZOOM_MIN_PX_PER_SEC);
+		expect(clampZoom(0.5)).toBe(5);
+		expect(clampZoom(100000)).toBe(200);
+		expect(clampZoom(42)).toBe(42);
 	});
 });

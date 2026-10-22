@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { api, ApiError } from '$lib/api';
 	import type { FileStatus } from '$lib/types';
 	import { AnnotationState } from '$lib/annotator/store';
@@ -11,6 +11,7 @@
 	import type { Wave } from '$lib/annotator/wave';
 	import { hotkeyForEvent } from '$lib/annotator/hotkeys';
 	import type { HotkeyAction } from '$lib/annotator/hotkeys';
+	import { leaseLostMessage } from '$lib/annotator/lease';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -59,6 +60,11 @@
 	let confirmEmpty = $state(false);
 	let allDone = $state(false);
 	let leaseLost = $state(false);
+	/** Текст модала потери лизы: зависит от того, что стало с файлом. */
+	let leaseLostText = $state('');
+	/** Лиза потерялась потому, что файл приняли (done): в модале — Переоткрыть. */
+	let leaseLostDone = $state(false);
+	let reopening = $state(false);
 
 	let wave: Wave | null = null;
 	let waveContainer: HTMLElement | null = null;
@@ -66,6 +72,8 @@
 
 	const projectId = $derived(data.file.project_id);
 	const durationMs = $derived(data.file.duration_ms ?? 0);
+	/** Готовый (done) файл открыт в режиме чтения: правки запрещены. */
+	const readOnly = $derived(data.file.status === 'done');
 	/** Палитра без архивированных меток. */
 	const labels = $derived(data.labels.filter((l) => !l.archived));
 	const labelById = $derived(new Map(data.labels.map((l) => [l.id, l])));
@@ -91,6 +99,39 @@
 
 	function genericError(err: unknown): string {
 		return err instanceof ApiError ? err.message : 'Не удалось связаться с сервером';
+	}
+
+	/**
+	 * 409 lease_required различаем по контексту:
+	 * свежий статус файла решает, что произошло — done → файл read-only и его
+	 * можно переоткрыть; прочее — лиза ушла к другому разметчику / в очередь.
+	 */
+	async function handleLeaseLost(): Promise<void> {
+		let freshStatus: FileStatus | null = null;
+		try {
+			freshStatus = (await api.getFile(data.file.id)).status;
+		} catch {
+		}
+		leaseLostText = leaseLostMessage(freshStatus);
+		leaseLostDone = freshStatus === 'done';
+		leaseLost = true;
+	}
+
+	/** Переоткрыть принятый файл: бэкенд даёт свежую лизу, экран — в режим правок. */
+	async function reopen(): Promise<void> {
+		if (reopening) return;
+		reopening = true;
+		actionError = '';
+		try {
+			await api.reopenFile(data.file.id);
+			leaseLost = false;
+			leaseLostDone = false;
+			await invalidateAll();
+		} catch (err) {
+			actionError = genericError(err);
+		} finally {
+			reopening = false;
+		}
 	}
 
 	/** Мс → м:сс.ммм. */
@@ -185,7 +226,7 @@
 	}
 
 	function onCompleteClick(): void {
-		if (completing) return;
+		if (completing || readOnly) return;
 		if (model.segments.length === 0) {
 			confirmEmpty = true;
 			return;
@@ -208,7 +249,7 @@
 				allDone = true;
 			}
 		} catch (err) {
-			if (isLeaseLost(err)) leaseLost = true;
+			if (isLeaseLost(err)) await handleLeaseLost();
 			else actionError = genericError(err);
 		} finally {
 			completing = false;
@@ -234,7 +275,7 @@
 						s.fileDirty = false;
 						if (session === s) dirty = false;
 					} catch (err) {
-						if (isLeaseLost(err)) leaseLost = true;
+						if (isLeaseLost(err)) void handleLeaseLost();
 						throw err;
 					}
 				}
@@ -254,6 +295,8 @@
 		confirmEmpty = false;
 		allDone = false;
 		leaseLost = false;
+		leaseLostText = '';
+		leaseLostDone = false;
 
 		let cancelled = false;
 		let w: Wave | null = null;
@@ -292,9 +335,13 @@
 					created.ws.on('pause', () => (playing = false));
 
 					for (const seg of model.segments) {
-						created.addRegion(seg.uid, seg.start_ms, seg.end_ms, colorOf(seg.label_id));
+						created.addRegion(seg.uid, seg.start_ms, seg.end_ms, colorOf(seg.label_id), {
+							editable: !readOnly
+						});
 					}
-					if (st.selectedLabelId) created.setDrawColor(colorOf(st.selectedLabelId));
+					if (!readOnly && st.selectedLabelId) {
+						created.setDrawColor(colorOf(st.selectedLabelId));
+					}
 				})
 				.catch((err: unknown) => {
 					if (!cancelled) {
@@ -325,6 +372,9 @@
 			if (leaseLost || completing) return;
 			const action: HotkeyAction | null = hotkeyForEvent(e, data.labels);
 			if (!action) return;
+			if (readOnly && (action.type === 'selectLabel' || action.type === 'deleteSelected')) {
+				return;
+			}
 			e.preventDefault();
 			switch (action.type) {
 				case 'selectLabel':
@@ -366,11 +416,22 @@
 		<a class="back" href="/projects/{projectId}">← Проект</a>
 		<span class="name">{data.file.original_name}</span>
 		<span class="status {data.file.status}">{STATUS_LABELS[data.file.status]}</span>
-		<span class="savestate" class:dirty>{dirty ? 'правки не сохранены' : 'сохранено'}</span>
-		<button class="primary" onclick={onCompleteClick} disabled={completing}>
-			{completing ? 'Сохраняем…' : 'Готово ✓'}
-		</button>
+		{#if !readOnly}
+			<span class="savestate" class:dirty>{dirty ? 'правки не сохранены' : 'сохранено'}</span>
+			<button class="primary" onclick={onCompleteClick} disabled={completing}>
+				{completing ? 'Сохраняем…' : 'Готово ✓'}
+			</button>
+		{/if}
 	</header>
+
+	{#if readOnly}
+		<div class="banner readonly">
+			<p>Файл размечен и принят — read-only</p>
+			<button class="primary" onclick={reopen} disabled={reopening}>
+				{reopening ? 'Открываем…' : 'Переоткрыть'}
+			</button>
+		</div>
+	{/if}
 
 	{#if waveError}
 		<p class="error">{waveError}</p>
@@ -401,27 +462,47 @@
 				<button class:active={rate === r} onclick={() => setRate(r)}>{fmtRate(r)}</button>
 			{/each}
 		</span>
+		<span class="zoom">
+			<button
+				onclick={() => wave?.zoomOut()}
+				disabled={!durationMs}
+				aria-label="Отдалить волну"
+				title="Отдалить (или колесо мыши вниз над волной)"
+			>
+				−
+			</button>
+			<button
+				onclick={() => wave?.zoomIn()}
+				disabled={!durationMs}
+				aria-label="Приблизить волну"
+				title="Приблизить (или колесо мыши вверх над волной)"
+			>
+				+
+			</button>
+		</span>
 	</div>
 
-	<div class="palette">
-		{#each labels as label (label.id)}
-			<button
-				class="label"
-				class:active={view.selectedLabelId === label.id}
-				onclick={() => selectLabel(label.id)}
-				title={label.hotkey ? `Клавиша ${label.hotkey}` : undefined}
-			>
-				<span class="dot" style:background={label.color}></span>
-				{label.name}
-				{#if label.hotkey}<kbd>{label.hotkey}</kbd>{/if}
-			</button>
-		{/each}
-		{#if labels.length === 0}
-			<p class="hint">В проекте нет активных меток — создайте их на дашборде проекта.</p>
-		{:else if !view.selectedLabelId}
-			<p class="hint">Выберите метку и протяните по волне, чтобы создать сегмент.</p>
-		{/if}
-	</div>
+	{#if !readOnly}
+		<div class="palette">
+			{#each labels as label (label.id)}
+				<button
+					class="label"
+					class:active={view.selectedLabelId === label.id}
+					onclick={() => selectLabel(label.id)}
+					title={label.hotkey ? `Клавиша ${label.hotkey}` : undefined}
+				>
+					<span class="dot" style:background={label.color}></span>
+					{label.name}
+					{#if label.hotkey}<kbd>{label.hotkey}</kbd>{/if}
+				</button>
+			{/each}
+			{#if labels.length === 0}
+				<p class="hint">В проекте нет активных меток — создайте их на дашборде проекта.</p>
+			{:else if !view.selectedLabelId}
+				<p class="hint">Выберите метку и протяните по волне, чтобы создать сегмент.</p>
+			{/if}
+		</div>
+	{/if}
 
 	{#if view.segments.length === 0}
 		<p class="hint">Сегментов пока нет.</p>
@@ -448,40 +529,50 @@
 						<td><span class="dot" style:background={colorOf(seg.label_id)}></span></td>
 						<td>{nameOf(seg.label_id)}</td>
 						<td>
-							<input
-								type="number"
-								min={0}
-								max={seg.end_ms - 1}
-								step={1}
-								value={seg.start_ms}
-								onclick={(e) => e.stopPropagation()}
-								onchange={(e) => editStart(seg, e)}
-							/>
+							{#if readOnly}
+								{seg.start_ms}
+							{:else}
+								<input
+									type="number"
+									min={0}
+									max={seg.end_ms - 1}
+									step={1}
+									value={seg.start_ms}
+									onclick={(e) => e.stopPropagation()}
+									onchange={(e) => editStart(seg, e)}
+								/>
+							{/if}
 						</td>
 						<td>→</td>
 						<td>
-							<input
-								type="number"
-								min={seg.start_ms + 1}
-								max={durationMs}
-								step={1}
-								value={seg.end_ms}
-								onclick={(e) => e.stopPropagation()}
-								onchange={(e) => editEnd(seg, e)}
-							/>
+							{#if readOnly}
+								{seg.end_ms}
+							{:else}
+								<input
+									type="number"
+									min={seg.start_ms + 1}
+									max={durationMs}
+									step={1}
+									value={seg.end_ms}
+									onclick={(e) => e.stopPropagation()}
+									onchange={(e) => editEnd(seg, e)}
+								/>
+							{/if}
 						</td>
 						<td>{fmt(seg.end_ms - seg.start_ms)}</td>
 						<td>
-							<button
-								class="danger"
-								title="Удалить сегмент (Del)"
-								onclick={(e) => {
-									e.stopPropagation();
-									removeSegment(seg.uid);
-								}}
-							>
-								×
-							</button>
+							{#if !readOnly}
+								<button
+									class="danger"
+									title="Удалить сегмент (Del)"
+									onclick={(e) => {
+										e.stopPropagation();
+										removeSegment(seg.uid);
+									}}
+								>
+									×
+								</button>
+							{/if}
 						</td>
 					</tr>
 				{/each}
@@ -507,8 +598,13 @@
 {#if leaseLost}
 	<div class="overlay" role="dialog" aria-modal="true">
 		<div class="modal">
-			<p>Файл вернулся в очередь, ваши правки не сохранены</p>
+			<p>{leaseLostText}</p>
 			<div class="row">
+				{#if leaseLostDone}
+					<button class="primary" onclick={reopen} disabled={reopening}>
+						{reopening ? 'Открываем…' : 'Переоткрыть'}
+					</button>
+				{/if}
 				<a class="button" href="/projects/{projectId}">К дашборду</a>
 			</div>
 		</div>
@@ -729,6 +825,31 @@
 	.banner p {
 		margin: 0;
 		color: #2e7d32;
+	}
+
+	.banner.readonly {
+		border-color: #9a6700;
+	}
+
+	.banner.readonly p {
+		color: #9a6700;
+	}
+
+	.banner.readonly button {
+		margin-left: auto;
+		white-space: nowrap;
+	}
+
+	.zoom {
+		display: inline-flex;
+		gap: 0.25rem;
+		margin-left: 0.5rem;
+	}
+
+	.zoom button {
+		padding: 0.25rem 0.7rem;
+		font-size: 1rem;
+		line-height: 1;
 	}
 
 	.error {

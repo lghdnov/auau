@@ -21,6 +21,7 @@
 		{ value: '', label: 'Все' },
 		{ value: 'new', label: 'Новые' },
 		{ value: 'in_progress', label: 'В работе' },
+		{ value: 'processing', label: 'Обработка' },
 		{ value: 'done', label: 'Готово' },
 		{ value: 'error', label: 'Ошибки' }
 	];
