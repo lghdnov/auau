@@ -54,6 +54,25 @@ pub fn spawn_worker(
     })
 }
 
+/// Crash recovery at startup: the pending-work channel lives in memory, so a
+/// restart or crash loses whatever had not been processed yet and the rows
+/// would stay `processing` forever. This feeds every such row back through
+/// the pipeline (oldest first), where `process_file` decides `new` vs
+/// `error` again — decoding is idempotent, so a second instance racing on
+/// the same rows is harmless (the status UPDATE only matches `processing`).
+/// Returns the number of re-enqueued files.
+pub async fn reenqueue_stuck(pool: &PgPool, queue: &JobQueue) -> anyhow::Result<u64> {
+    let ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM audio_files WHERE status = 'processing' ORDER BY created_at",
+    )
+    .fetch_all(pool)
+    .await?;
+    for id in &ids {
+        queue.enqueue(*id).await?;
+    }
+    Ok(ids.len() as u64)
+}
+
 /// Return expired queue leases: `in_progress` files whose `claim_expires_at`
 /// has passed go back to `new`, unclaimed. Annotations are deliberately kept
 /// — the next annotator continues the partial work. Returns the number of
@@ -138,4 +157,135 @@ async fn process_file(pool: &PgPool, store: &MediaStore, file_id: Uuid) -> anyho
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::test_support;
+    use crate::media::testutil::sine_wav;
+
+    /// Create a user and a project for them — the FK anchors of a file row.
+    async fn user_and_project(pool: &PgPool) -> (Uuid, Uuid) {
+        let (user, _cookie) = test_support::signed_in(pool).await.unwrap();
+        let project_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO projects (id, name, created_by) VALUES ($1, $2, $3)")
+            .bind(project_id)
+            .bind(format!("проект-{}", project_id.simple()))
+            .bind(user.id)
+            .execute(pool)
+            .await
+            .unwrap();
+        (user.id, project_id)
+    }
+
+    /// Insert a file row in the given status and store its media on disk —
+    /// the exact state an upload leaves behind before the worker runs.
+    async fn insert_file_with_media(
+        pool: &PgPool,
+        project_id: Uuid,
+        uploaded_by: Uuid,
+        status: FileStatus,
+        media: &[u8],
+        store: &MediaStore,
+    ) -> Uuid {
+        let id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO audio_files (id, project_id, original_name, storage_key, sha256,
+                mime, size_bytes, status, uploaded_by)
+             VALUES ($1, $2, 'файл.wav', $3, $4, 'audio/wav', $5, $6, $7)",
+        )
+        .bind(id)
+        .bind(project_id)
+        .bind(format!("media/{id}.wav"))
+        .bind(id.simple().to_string())
+        .bind(media.len() as i64)
+        .bind(status)
+        .bind(uploaded_by)
+        .execute(pool)
+        .await
+        .unwrap();
+        store.save_upload(id, "wav", media).unwrap();
+        id
+    }
+
+    /// The file row, for status assertions.
+    async fn row(pool: &PgPool, id: Uuid) -> AudioFile {
+        sqlx::query_as("SELECT * FROM audio_files WHERE id = $1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    /// Poll until `id` leaves `processing` (the worker runs asynchronously).
+    async fn wait_not_processing(pool: &PgPool, id: Uuid) -> AudioFile {
+        for _ in 0..100 {
+            let file = row(pool, id).await;
+            if file.status != FileStatus::Processing {
+                return file;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("file {id} is still processing after 2s");
+    }
+
+    /// The startup recovery path: `processing` rows left by a crashed run are
+    /// re-fed through a freshly spawned worker and reach `new`/`error` again.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn reenqueue_stuck_recovers_processing_rows(pool: PgPool) {
+        let (user, project) = user_and_project(&pool).await;
+        let store = MediaStore::new(tempfile::tempdir().unwrap().keep());
+
+        let stuck_ok = insert_file_with_media(
+            &pool,
+            project,
+            user,
+            FileStatus::Processing,
+            &sine_wav(440.0, 1.0, 8000),
+            &store,
+        )
+        .await;
+        let stuck_bad = insert_file_with_media(
+            &pool,
+            project,
+            user,
+            FileStatus::Processing,
+            b"definitely not audio",
+            &store,
+        )
+        .await;
+        let fresh = insert_file_with_media(
+            &pool,
+            project,
+            user,
+            FileStatus::New,
+            &sine_wav(880.0, 1.0, 8000),
+            &store,
+        )
+        .await;
+
+        let (jobs, job_rx) = JobQueue::new();
+        let _worker = spawn_worker(pool.clone(), store.clone(), job_rx);
+
+        let reenqueued = reenqueue_stuck(&pool, &jobs).await.unwrap();
+        assert_eq!(reenqueued, 2, "only the processing rows are re-enqueued");
+
+        let done = wait_not_processing(&pool, stuck_ok).await;
+        assert_eq!(done.status, FileStatus::New);
+        assert_eq!(done.duration_ms, Some(1000));
+        assert_eq!(done.sample_rate, Some(8000));
+        assert_eq!(done.error_message, None);
+        assert!(store.read_peaks(stuck_ok).is_ok(), "peaks must be written");
+
+        let failed = wait_not_processing(&pool, stuck_bad).await;
+        assert_eq!(failed.status, FileStatus::Error);
+        assert!(failed.error_message.is_some_and(|m| !m.is_empty()));
+
+        assert_eq!(row(&pool, fresh).await.status, FileStatus::New);
+
+        let (jobs2, job_rx2) = JobQueue::new();
+        let _worker2 = spawn_worker(pool.clone(), store, job_rx2);
+        assert_eq!(reenqueue_stuck(&pool, &jobs2).await.unwrap(), 0);
+    }
 }

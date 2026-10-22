@@ -138,7 +138,7 @@ fn duplicate(original_name: String, existing: Uuid) -> UploadResult {
         original_name,
         status: UploadStatus::Duplicate,
         file_id: Some(existing),
-        message: Some("identical file already uploaded to this project".into()),
+        message: Some("дубликат: файл уже загружен в этот проект".into()),
     }
 }
 
@@ -194,11 +194,14 @@ async fn upload(
         }
 
         if too_large {
-            results.push(rejected(original_name, "file too large"));
+            results.push(rejected(original_name, "файл больше лимита"));
             continue;
         }
         let Some(ext) = allowed_ext(&original_name) else {
-            results.push(rejected(original_name, "unsupported file type"));
+            results.push(rejected(
+                original_name,
+                "неподдерживаемый тип файла (wav/flac/mp3/ogg/m4a)",
+            ));
             continue;
         };
 
@@ -645,6 +648,10 @@ mod tests {
         let (status, second) = upload(&app, &cookie, project, "copy.wav", &wav).await;
         assert_eq!(status, StatusCode::CREATED);
         assert_eq!(second[0]["status"], json!("duplicate"));
+        assert_eq!(
+            second[0]["message"],
+            json!("дубликат: файл уже загружен в этот проект")
+        );
         let second_id: Uuid = second[0]["file_id"].as_str().unwrap().parse().unwrap();
         assert_eq!(second_id, first_id);
 
@@ -672,7 +679,7 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::CREATED);
         assert_eq!(body[0]["status"], json!("rejected"));
-        assert_eq!(body[0]["message"], json!("file too large"));
+        assert_eq!(body[0]["message"], json!("файл больше лимита"));
         assert_eq!(body[0]["file_id"], Value::Null);
 
         let count: i64 = sqlx::query_scalar("SELECT count(*) FROM audio_files")
@@ -692,7 +699,10 @@ mod tests {
             let (status, body) = upload(&app, &cookie, project, filename, b"whatever").await;
             assert_eq!(status, StatusCode::CREATED);
             assert_eq!(body[0]["status"], json!("rejected"));
-            assert_eq!(body[0]["message"], json!("unsupported file type"));
+            assert_eq!(
+                body[0]["message"],
+                json!("неподдерживаемый тип файла (wav/flac/mp3/ogg/m4a)")
+            );
             assert_eq!(body[0]["file_id"], Value::Null);
         }
 

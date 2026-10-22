@@ -10,10 +10,10 @@ use auau::{
     media::store::MediaStore,
 };
 
-#[cfg(not(feature = "e2e-auth-bypass"))]
-use auau::auth::oidc::PocketIdExchanger;
 #[cfg(feature = "e2e-auth-bypass")]
 use auau::auth::oidc::NoIdpExchanger;
+#[cfg(not(feature = "e2e-auth-bypass"))]
+use auau::auth::oidc::PocketIdExchanger;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -27,6 +27,12 @@ async fn main() -> anyhow::Result<()> {
     let store = MediaStore::new(config.storage_dir.clone());
     let (jobs, job_rx) = JobQueue::new();
     let _worker = jobs::spawn_worker(pool.clone(), store.clone(), job_rx);
+
+    match jobs::reenqueue_stuck(&pool, &jobs).await {
+        Ok(0) => {}
+        Ok(stuck) => tracing::info!(stuck, "re-enqueued processing files left by a previous run"),
+        Err(err) => tracing::error!(error = ?err, "failed to re-enqueue processing files"),
+    }
 
     {
         let sweeper_pool = pool.clone();
@@ -51,7 +57,10 @@ async fn main() -> anyhow::Result<()> {
     let (exchanger, end_session_url) = {
         let exchanger = PocketIdExchanger::from_config(&config).await?;
         let end_session_url = exchanger.end_session_url();
-        (Arc::new(exchanger) as Arc<dyn CodeExchanger>, end_session_url)
+        (
+            Arc::new(exchanger) as Arc<dyn CodeExchanger>,
+            end_session_url,
+        )
     };
     #[cfg(feature = "e2e-auth-bypass")]
     let (exchanger, end_session_url): (Arc<dyn CodeExchanger>, Option<String>) =

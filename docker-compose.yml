@@ -30,7 +30,8 @@ services:
     image: postgres:16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-auau}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-auau}
+
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
       POSTGRES_DB: ${POSTGRES_DB:-auau}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -44,13 +45,13 @@ services:
 
   pocket-id:
 
-    image: ghcr.io/pocket-id/pocket-id:latest
+    image: ghcr.io/pocket-id/pocket-id:2.18.0
     ports:
       - "14111:1411"
     environment:
       APP_URL: ${POCKET_ID_APP_URL:-http://localhost:14111}
 
-      ENCRYPTION_KEY: ${POCKET_ID_ENCRYPTION_KEY:-please-change-me-0123456789abcdef}
+      ENCRYPTION_KEY: ${POCKET_ID_ENCRYPTION_KEY:?set in .env}
     volumes:
       - pocket-id-data:/app/data
     healthcheck:
